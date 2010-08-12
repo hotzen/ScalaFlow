@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<projectDescription>
+  <name>ScalaFlow</name>
+  <comment>ScalaFlow 1.0</comment>
+  <projects></projects>
+  <buildSpec>
+    <buildCommand>
+      <name>ch.epfl.lamp.sdt.core.scalabuilder</name>
+    </buildCommand>
+    
+  </buildSpec>
+  <natures>
+    <nature>ch.epfl.lamp.sdt.core.scalanature</nature>
+    <nature>org.eclipse.jdt.core.javanature</nature>
+    
+  </natures>
+</projectDescription>
