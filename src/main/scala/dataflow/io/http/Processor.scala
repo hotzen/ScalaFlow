@@ -17,8 +17,8 @@ class HttpProcessor(val socket: Socket, val forceCharset: Option[Charset] = None
   def request(req: HttpRequest): Unit @suspendable = 
     socket.write << Socket.ByteBufferToArray( req.toBytes ) 
   
-  def requests: ChannelGet[HttpRequest]   = chRequests
-  def responses: ChannelGet[HttpResponse] = chResponses
+  def requests: ChannelTake[HttpRequest]   = chRequests
+  def responses: ChannelTake[HttpResponse] = chResponses
   
   private lazy val chTokens: Channel[Tokenizer.Token] = {
     val t = new Tokenizer

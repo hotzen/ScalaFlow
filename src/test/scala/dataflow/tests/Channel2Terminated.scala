@@ -34,7 +34,7 @@ object Channel2 extends Test {
     
     def printGetStats(ch: Channel[_]): Unit @dataflow = {
       try {
-        ch.get
+        ch.take
         ()
       } catch { case TerminatedChannel => {
         println("channel: " + ch.toString)

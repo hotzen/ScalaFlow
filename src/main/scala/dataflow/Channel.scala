@@ -41,9 +41,9 @@ object Channel {
     new Channel[T]( ch.capacity )( ch.scheduler )
 }
 
-trait ChannelGet[T] { self: Channel[T] =>
-  def get: T @suspendable
-  def apply(): T @suspendable = get
+trait ChannelTake[T] { self: Channel[T] =>
+  def take: T @suspendable
+  def apply(): T @suspendable = take
   
   def foreach[U](f: T => U @suspendable): Unit @suspendable
   def map[M](f: T => M @suspendable): Channel[M]
@@ -59,8 +59,8 @@ trait ChannelGet[T] { self: Channel[T] =>
   
   def duplicate(): (Channel[T], Channel[T])
   def split(p: T => Boolean @suspendable): (Channel[T], Channel[T])
-  def combine[A <: T](ch2: ChannelGet[A]): Channel[T]
-  def concat[A <: T](ch2: ChannelGet[A]): Channel[T]
+  def combine[A <: T](ch2: ChannelTake[A]): Channel[T]
+  def concat[A <: T](ch2: ChannelTake[A]): Channel[T]
   def transfer[B](to: ChannelPut[B], f: T => B): Unit
   def transferTerminate[B](to: ChannelPut[B] with ChannelTerminate[B], f: T => B): Unit
 }
@@ -87,35 +87,28 @@ trait ChannelTerminate[T] { self: Channel[T] =>
   def <<#? : Unit = tryTerminate
 }
   
-final class Channel[T](val capacity: Int)(implicit val scheduler: Scheduler) extends ChannelGet[T] with ChannelPut[T] with ChannelTerminate[T] {
+final class Channel[T](val capacity: Int)(implicit val scheduler: Scheduler)
+  extends ChannelTake[T] with ChannelPut[T] with ChannelTerminate[T] {
   assert( capacity > 0 )
     
-//  private[this] class Stream[T] {
-//    val value = new Variable[T]
-//    var next: Stream[T] = null
-//  }
-  
-  private[this] class Stream[T] {
-    //@volatile var value: T = null.asInstanceOf[T]
-    val value = new Variable[T]
-    var next: Stream[T] = null
-    var last: Boolean   = false
-  }
-  
-  type Consumer = (T => Unit)
-  type Producer = (Unit => Unit)
-  
   def cpsunit: Unit @suspendable = ()
   val self = this
   
-  private[this] var head = new Stream[T]
-  private[this] var tail = head
+  private[this] class Stream[T] {
+    val value = new Variable[T]
+    var next: Stream[T] = null
+  }
+  
+  type Producer = (Unit => Unit)
+
+  private[this] var streamTake = new Stream[T]
+  private[this] var streamPut  = streamTake
     
-  private[this] val headLock = new ReentrantLock
-  private[this] val tailLock = new ReentrantLock
+  private[this] val lockTake = new ReentrantLock
+  private[this] val lockPut  = new ReentrantLock
   
   private[this] val suspendedProducers = new ConcurrentLinkedQueue[Producer]
-  
+    
   private[this] val counter = new AtomicInteger(0)
   
   private[this] val terminatedSignal = new Signal
@@ -126,83 +119,113 @@ final class Channel[T](val capacity: Int)(implicit val scheduler: Scheduler) ext
   
   def size: Int        = counter.get
   def isEmpty: Boolean = (size == 0)
-  def isFull: Boolean  = (size >= capacity)
+  def isFull: Boolean  = (size == capacity)
     
   def isLazy: Boolean  = (capacity == 1)
   def isEager: Boolean = (capacity == Int.MaxValue)
   def isBound: Boolean = !isLazy && !isEager
   
-
-  
-  def get(): T @suspendable = {
-    headLock.lock
+  private[this] val T = null.asInstanceOf[T] 
     
-    // flagged as terminated and no next element
-    if (terminatedFlag && head.next == null) {
-      headLock.unlock
-      
-      if (!processedFlag) {
-        processedFlag = true
-        processedSignal.invoke
-      }
-      
+  dataflow.util.Logger.DefaultLevel = dataflow.util.LogLevel.All
+  val logger = dataflow.util.Logger.get("Ch")
+  
+  def take(): T @suspendable = {
+    if (terminatedFlag && streamTake.next == null)
       throw TerminatedChannel
-    }
+        
+    lockTake.lock
     
     // empty, create new empty variable for this consumer
-    if (head.next == null) {
-      println("get() E!")
-      tailLock.lock
-      head.next = new Stream[T]
-      tailLock.unlock
+    if (!terminatedFlag && streamTake.next == null) {
+      lockPut.lock
+      if (streamTake.next == null) {
+        logger trace ("take create next")
+        streamTake.next = new Stream[T]
+      }
+      lockPut.unlock
     }
     
-    val dfvar = head.value
-    head = head.next
-    counter.decrementAndGet
-    headLock.unlock
+    logger trace ("take dfvar")
+    val dfvar = streamTake.value
+    
+    // may be null on terminated channel, then just stay here
+    if (streamTake.next != null) {
+      streamTake = streamTake.next
+      counter.decrementAndGet // may be < 0
+    }
+    lockTake.unlock
     
     resumeProducer()
     
-    dfvar.get // suspend
+    val v = dfvar.get // suspend
+    
+    logger trace ("take v="+v)
+    if (v == T)
+      throw TerminatedChannel
+          
+    v
   }
   
   def put(v: T): Unit @suspendable = {
-    if (counter.get == capacity)
-      suspendProducer()
-    else cpsunit
+    if (terminatedFlag)
+      throw new Exception("Channel is terminated")
     
-    tailLock.lock
-    val dfvar = tail.value
+    lockPut.lock
     
-    if (tail.next == null)
-      tail.next = new Stream[T]
+    logger trace ("put("+v+") counter=" + counter.get + " / capacity=" + capacity)
     
-    tail = tail.next
+    
+    if (isFull) // can only decrease
+      suspendProducer(lockPut)
+    else
+      cpsunit
+    
+    lockPut.lock
     counter.incrementAndGet
-    tailLock.unlock
+    val dfvar = streamPut.value
+    if (streamPut.next == null) {
+      logger trace ("put("+v+") create next")
+      streamPut.next = new Stream[T]
+    }
+    streamPut = streamPut.next
+    
+    while (lockPut.isHeldByCurrentThread)
+      lockPut.unlock
+    
+    logger trace ("put("+v+") DONE")
     
     dfvar set v
   }
-  
-  private def suspendProducer(): Unit @suspendable =
+    
+  private def suspendProducer(lock: ReentrantLock): Unit @suspendable = {
     shift { k: Producer =>
-      println("suspendProducer")
-      suspendedProducers offer k
-      
-      if (counter.get < capacity && suspendedProducers.remove(k)) {
-        println("suspend RACE !!!!")
+      if (!isFull) { // Race #1
+        logger trace ("suspend, race1")
+        k()
+      } else {
+        suspendedProducers offer k
+        if (!isFull && suspendedProducers.remove(k)) { // Race #2
+          logger trace ("suspend, race2")
+          k()
+        } else {
+          logger trace ("suspend, unlocking")
+          lock.unlock
+        }
       }
-      
-      ()
     }
+  }
+      
   
   // resuming only one producer in FIFO-order ensures fairness
   private def resumeProducer(): Unit = {
-    println("resumeProducer")
     val k = suspendedProducers.poll
-    if (k != null)
+    if (k != null) {
+      logger trace ("resuming... counter=" + counter.get)
       scheduler execute { k() }
+    } else {
+      logger trace ("nothing to resume")
+    }
   }
   
     
@@ -223,6 +246,21 @@ final class Channel[T](val capacity: Int)(implicit val scheduler: Scheduler) ext
     
   def terminate: Unit = {
     terminatedFlag = true
+    
+    lockTake.lock
+    lockPut.lock
+    
+    // wake all consumers waiting for unset dataflow-variables
+    streamPut.value := T
+    var s = streamPut
+    while (s.next != null) {
+      s = s.next
+      s.value := T
+    }
+    
+    lockPut.unlock
+    lockTake.unlock
+    
     terminatedSignal.invoke
   }
   
@@ -489,7 +527,7 @@ final class Channel[T](val capacity: Int)(implicit val scheduler: Scheduler) ext
   
   @throws(classOf[TerminatedChannel])
   def reduce[B >: T](f: (T,B) => B @suspendable): B @suspendable = {
-    val z: B = this.get
+    val z: B = this.take
     this.fold(z)(f)
   }
   
@@ -560,7 +598,7 @@ final class Channel[T](val capacity: Int)(implicit val scheduler: Scheduler) ext
    * @return new channel with values of both this and second channel
    */
   @deprecated("NOT YET TESTED")
-  def combine[A <: T](ch2: ChannelGet[A]): Channel[T] = {
+  def combine[A <: T](ch2: ChannelTake[A]): Channel[T] = {
     val ch  = Channel.createLike[T](this)
     val ch1 = this
     val ch1Done = new Signal
@@ -593,7 +631,7 @@ final class Channel[T](val capacity: Int)(implicit val scheduler: Scheduler) ext
    * @return
    */
   @deprecated("NOT YET TESTED")
-  def concat[A <: T](ch2: ChannelGet[A]): Channel[T] = {
+  def concat[A <: T](ch2: ChannelTake[A]): Channel[T] = {
     val ch  = Channel.createLike[T](this)
     val ch1 = this
     scheduler execute { reset {

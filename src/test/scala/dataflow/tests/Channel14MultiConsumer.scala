@@ -23,7 +23,7 @@ object Channel14 extends Test {
       import DataFlowIterable._
       for ( i <- (1 to 10).dataflow) {
         ch << i
-        //println(i + " added")
+//        println(i + " added")
       }
     }
                     

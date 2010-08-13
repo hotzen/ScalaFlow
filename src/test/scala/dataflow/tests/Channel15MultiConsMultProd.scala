@@ -17,16 +17,18 @@ object Channel15 extends Test {
     val ps = List(
       flow {
         for (i <- (1 to 9).dataflow) {
-          println("+ pre  << " + i)
+          //println("+ pre  << " + i)
           ch << i
-          println("+ post << " + i)
+          println("ch << " + i)
+          //println("+ post << " + i)
         }
       },
       flow {
         for (i <- (-9 to -1).dataflow) {
-          println("- pre  << " + i)
+          //println("- pre  << " + i)
           ch << i
-          println("- post  << " + i)
+          println("ch << " + i)
+          //println("- post  << " + i)
         }
       }
     )
@@ -42,7 +44,7 @@ object Channel15 extends Test {
 //    }
     
     // consumers
-    val cs = for (ci <- 1 to 1) yield flow {
+    val cs = for (ci <- 1 to 3) yield flow {
       for (x <- ch) {
         println("#"+ci+": " + x) 
       }
@@ -50,6 +52,7 @@ object Channel15 extends Test {
     }
 
     ps.foreach(_.await)
+    println("producers finished")
     flow { ch <<# }
     
     cs.foreach(_.await)
