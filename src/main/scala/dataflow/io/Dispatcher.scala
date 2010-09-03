@@ -31,7 +31,7 @@ object Dispatcher {
   case object Write   extends NIO_OP(SelectionKey.OP_WRITE)
 }
 
-sealed abstract class NIO_OP(op: Int) {
+sealed class NIO_OP(op: Int) {
 //  def hasInterest(ops: Int): Boolean = (ops & op) == op
   def addInterestTo(ops: Int): Int       = ops | op
   def removeInterestFrom(ops: Int): Int  = ops & ~op

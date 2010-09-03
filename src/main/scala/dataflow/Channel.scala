@@ -24,56 +24,56 @@ object Channel {
   
   val DefaultBound = 1000
   
-  def createBounded[T](bound: Int)(implicit scheduler: Scheduler): Channel[T] =
-    new Channel[T]( bound )(scheduler)
+  def createBounded[A](bound: Int)(implicit scheduler: Scheduler): Channel[A] =
+    new Channel[A]( bound )(scheduler)
   
-  def createLazy[T](implicit scheduler: Scheduler): Channel[T] =
-    new Channel[T]( 1 )(scheduler) //TODO: 0?
+  def createLazy[A](implicit scheduler: Scheduler): Channel[A] =
+    new Channel[A]( 1 )(scheduler) //TODO: 0?
 
-  def createEager[T](implicit scheduler: Scheduler): Channel[T] =
-    new Channel[T]( Int.MaxValue )(scheduler)
+  def createEager[A](implicit scheduler: Scheduler): Channel[A] =
+    new Channel[A]( Int.MaxValue )(scheduler)
   
-  def create[T](implicit scheduler: Scheduler): Channel[T] =
-    createBounded[T](DefaultBound)(scheduler) // XXX prevents StackOverflow?
-    //newEager[T](scheduler)
+  def create[A](implicit scheduler: Scheduler): Channel[A] =
+    createBounded[A](DefaultBound)(scheduler) // XXX prevents StackOverflow?
+    //newEager[A](scheduler)
  
-  def createLike[T](ch: Channel[_]): Channel[T] =
-    new Channel[T]( ch.capacity )( ch.scheduler )
+  def createLike[A](ch: Channel[_]): Channel[A] =
+    new Channel[A]( ch.capacity )( ch.scheduler )
 }
 
-trait ChannelTake[T] { self: Channel[T] =>
-  def take: T @suspendable
-  def apply(): T @suspendable = take
+trait ChannelTake[A] { self: Channel[A] =>
+  def take: A @suspendable
+  def apply(): A @suspendable = take
   
-  def foreach[U](f: T => U @suspendable): Unit @suspendable
-  def map[M](f: T => M @suspendable): Channel[M]
-  def collect[M](f: T => Option[M] @suspendable): Channel[M]
-  def flatMap[M](f: T => Channel[M] @suspendable): Channel[M]
-  def flatMapIter[M](f: T => Iterable[M]): Channel[M]
-  def filter(p: T => Boolean @suspendable): Channel[T]
+  def foreach[U](f: A => U @suspendable): Unit @suspendable
+  def map[M](f: A => M @suspendable): Channel[M]
+  def collect[M](f: A => Option[M] @suspendable): Channel[M]
+  def flatMap[M](f: A => Channel[M] @suspendable): Channel[M]
+  def flatMapIter[M](f: A => Iterable[M]): Channel[M]
+  def filter(p: A => Boolean @suspendable): Channel[A]
   
   //TODO withFilter? requires ChannelFilter-definition here
   
-  def fold[B](z: B)(f: (T,B) => B @suspendable): B @suspendable
-  def reduce[B >: T](f: (T,B) => B @suspendable): B @suspendable
+  def fold[B](z: B)(f: (A,B) => B @suspendable): B @suspendable
+  def reduce[B >: A](f: (A,B) => B @suspendable): B @suspendable
   
-  def duplicate(): (Channel[T], Channel[T])
-  def split(p: T => Boolean @suspendable): (Channel[T], Channel[T])
-  def combine[A <: T](ch2: ChannelTake[A]): Channel[T]
-  def concat[A <: T](ch2: ChannelTake[A]): Channel[T]
-  def transfer[B](to: ChannelPut[B], f: T => B): Unit
-  def transferTerminate[B](to: ChannelPut[B] with ChannelTerminate[B], f: T => B): Unit
+  def duplicate(): (Channel[A], Channel[A])
+  def split(p: A => Boolean @suspendable): (Channel[A], Channel[A])
+  def combine[B <: A](ch2: ChannelTake[B]): Channel[A]
+  def concat[B <: A](ch2: ChannelTake[B]): Channel[A]
+  def transfer[B](to: ChannelPut[B], f: A => B): Unit
+  def transferTerminate[B](to: ChannelPut[B] with ChannelTerminate[B], f: A => B): Unit
 }
 
-trait ChannelPut[T] { self: Channel[T] =>
-  def put(value: T): Unit @suspendable
-  def <<(v: T): Unit @suspendable = put(v)
+trait ChannelPut[A] { self: Channel[A] =>
+  def put(value: A): Unit @suspendable
+  def <<(v: A) : Unit @suspendable = put(v)
   
-  def putAll(values: Iterable[T]): Unit @suspendable
-  def <<<(vs: Iterable[T]): Unit @suspendable = putAll(vs)
+  def putAll(values: Iterable[A]): Unit @suspendable
+  def <<<(vs: Iterable[A]) : Unit @suspendable = putAll(vs)
 }
 
-trait ChannelTerminate[T] { self: Channel[T] =>
+trait ChannelTerminate[A] { self: Channel[A] =>
   def isTerminated: Boolean
   def terminated: SuspendingAwait
   
@@ -87,23 +87,23 @@ trait ChannelTerminate[T] { self: Channel[T] =>
   def <<#? : Unit = tryTerminate
 }
   
-final class Channel[T](val capacity: Int)(implicit val scheduler: Scheduler)
-  extends ChannelTake[T] with ChannelPut[T] with ChannelTerminate[T] {
-  assert( capacity > 0 )
+final class Channel[A](val capacity: Int)(implicit val scheduler: Scheduler)
+  extends ChannelTake[A] with ChannelPut[A] with ChannelTerminate[A] {
+  assert( capacity >= 0 )
     
   def cpsunit: Unit @suspendable = ()
   val self = this
   
-  private[this] class Stream[T] {
-    val value = new Variable[T]
-    var next: Stream[T] = null
+  private[this] class Stream[A] {
+    val value = new Variable[A]
+    var next: Stream[A] = null
   }
   
   type Producer = (Unit => Unit)
 
-  private[this] var streamTake = new Stream[T]
+  private[this] var streamTake = new Stream[A]
   private[this] var streamPut  = streamTake
-    
+      
   private[this] val lockTake = new ReentrantLock
   private[this] val lockPut  = new ReentrantLock
   
@@ -118,98 +118,94 @@ final class Channel[T](val capacity: Int)(implicit val scheduler: Scheduler)
   @volatile private[this] var processedFlag  = false
   
   def size: Int        = counter.get
-  def isEmpty: Boolean = (size == 0)
-  def isFull: Boolean  = (size == capacity)
+  def isEmpty: Boolean = (size <= 0)
+  def isFull: Boolean  = (size >= capacity)
     
   def isLazy: Boolean  = (capacity == 1)
   def isEager: Boolean = (capacity == Int.MaxValue)
   def isBound: Boolean = !isLazy && !isEager
   
-  private[this] val T = null.asInstanceOf[T] 
+  private[this] val T = null.asInstanceOf[A] 
     
   dataflow.util.Logger.DefaultLevel = dataflow.util.LogLevel.All
   val logger = dataflow.util.Logger.get("Ch")
+    
   
-  def take(): T @suspendable = {
-    if (terminatedFlag && streamTake.next == null)
+  def take(): A @suspendable = {
+    if (terminatedFlag && streamTake.next == null) {
+//      logger trace ("fast throw")
       throw TerminatedChannel
-        
+    }
+    
     lockTake.lock
     
-    // empty, create new empty variable for this consumer
-    if (!terminatedFlag && streamTake.next == null) {
+    // create new empty variable for the next consumer
+    if (!terminatedFlag && (streamTake.next eq null)) {
       lockPut.lock
-      if (streamTake.next == null) {
-        logger trace ("take create next")
-        streamTake.next = new Stream[T]
+      if (!terminatedFlag && (streamTake.next eq null)) {
+        streamTake.next = new Stream[A]
       }
       lockPut.unlock
     }
     
-    logger trace ("take dfvar")
     val dfvar = streamTake.value
     
     // may be null on terminated channel, then just stay here
-    if (streamTake.next != null) {
+    if (streamTake.next ne null) {
       streamTake = streamTake.next
       counter.decrementAndGet // may be < 0
     }
+        
     lockTake.unlock
     
     resumeProducer()
     
     val v = dfvar.get // suspend
-    
-    logger trace ("take v="+v)
     if (v == T)
       throw TerminatedChannel
-          
     v
   }
   
-  def put(v: T): Unit @suspendable = {
+  
+  def put(v: A): Unit @suspendable = {
     if (terminatedFlag)
       throw new Exception("Channel is terminated")
     
     lockPut.lock
-    
-    logger trace ("put("+v+") counter=" + counter.get + " / capacity=" + capacity)
-    
-    
+    counter.incrementAndGet
+
     if (isFull) // can only decrease
       suspendProducer(lockPut)
     else
       cpsunit
     
     lockPut.lock
-    counter.incrementAndGet
+
+    //counter.incrementAndGet
     val dfvar = streamPut.value
-    if (streamPut.next == null) {
-      logger trace ("put("+v+") create next")
-      streamPut.next = new Stream[T]
+    if (streamPut.next eq null) {
+      streamPut.next = new Stream[A]
     }
     streamPut = streamPut.next
     
-    while (lockPut.isHeldByCurrentThread)
+    while (lockPut.getHoldCount > 0)
       lockPut.unlock
-    
-    logger trace ("put("+v+") DONE")
-    
+
     dfvar set v
   }
-    
+      
   private def suspendProducer(lock: ReentrantLock): Unit @suspendable = {
     shift { k: Producer =>
       if (!isFull) { // Race #1
-        logger trace ("suspend, race1")
+        println("ch suspend race#1")
         k()
       } else {
-        suspendedProducers offer k
+        assert( suspendedProducers offer k )
         if (!isFull && suspendedProducers.remove(k)) { // Race #2
-          logger trace ("suspend, race2")
+          println("ch suspend race#2")
           k()
         } else {
-          logger trace ("suspend, unlocking")
+          println("ch suspend unlock")
           lock.unlock
         }
       }
@@ -221,15 +217,15 @@ final class Channel[T](val capacity: Int)(implicit val scheduler: Scheduler)
   private def resumeProducer(): Unit = {
     val k = suspendedProducers.poll
     if (k != null) {
-      logger trace ("resuming... counter=" + counter.get)
+      //logger trace ("resuming... counter=" + counter.get)
       scheduler execute { k() }
     } else {
-      logger trace ("nothing to resume")
+      //logger trace ("nothing to resume")
     }
   }
   
     
-  def putAll(values: Iterable[T]): Unit @suspendable = {
+  def putAll(values: Iterable[A]): Unit @suspendable = {
     val it = values.iterator
     while (it.hasNext)
       this put it.next
@@ -245,17 +241,19 @@ final class Channel[T](val capacity: Int)(implicit val scheduler: Scheduler)
   def processed:  SuspendingAwait = processedSignal
     
   def terminate: Unit = {
+    if (terminatedFlag)
+      throw new DataFlowException("Channel already terminated")
+    
     terminatedFlag = true
     
     lockTake.lock
     lockPut.lock
     
-    // wake all consumers waiting for unset dataflow-variables
     streamPut.value := T
-    var s = streamPut
-    while (s.next != null) {
-      s = s.next
-      s.value := T
+
+    while (streamPut.next != null) {
+      streamPut = streamPut.next
+      streamPut.value := T
     }
     
     lockPut.unlock
@@ -267,11 +265,11 @@ final class Channel[T](val capacity: Int)(implicit val scheduler: Scheduler)
 //    if (terminatedFlag)
 //      throw new DataFlowException("Channel is already terminated")
 //    
-//    val v = null.asInstanceOf[T]
+//    val v = null.asInstanceOf[A]
 //    
 //    lastLock.lock
-//    val n = new Stream[T]
-//    n.value = T
+//    val n = new Stream[A]
+//    n.value = A
 //    last.next = n
 //    last = n
 //    lastLock.unlock
@@ -297,13 +295,13 @@ final class Channel[T](val capacity: Int)(implicit val scheduler: Scheduler)
    * 
    * @return new channel
    */
-  def foreach[U](f: T => U @suspendable): Unit @suspendable = {
+  def foreach[U](f: A => U @suspendable): Unit @suspendable = {
   	val ch = this
-   	try while(true)
-   	  f( ch() )
-  	catch { case TerminatedChannel => 
-  	        case BreakLoop         =>
-  	        case e:Exception       => handleEx(e) } 
+  	try loop {
+  	  f( ch.take )
+  	}	catch { case TerminatedChannel => 
+  	          case BreakLoop         =>
+  	          case e:Exception       => handleEx(e) } 
   }
   
   
@@ -317,16 +315,16 @@ final class Channel[T](val capacity: Int)(implicit val scheduler: Scheduler)
    * 
    * @return new channel
    */
-  def map[M](f: T => M @suspendable): Channel[M] = {
+  def map[M](f: A => M @suspendable): Channel[M] = {
   	val inCh  = this
   	val outCh = Channel.createLike[M](inCh)
 
   	scheduler execute { reset {
-  	  try while(true)
-  	    outCh put f( inCh() )
-  		catch { case TerminatedChannel => outCh.terminate
-              case BreakLoop         =>
-              case e:Exception       => handleEx(e) }
+  	  try loop {
+  	    outCh put f( inCh.take )
+  	  } catch { case TerminatedChannel => outCh.terminate
+                case BreakLoop         =>
+                case e:Exception       => handleEx(e) }
   	}}
   	outCh
   }
@@ -345,19 +343,18 @@ final class Channel[T](val capacity: Int)(implicit val scheduler: Scheduler)
    * 
    * @return new channel
    */
-  def collect[M](f: T => Option[M] @suspendable): Channel[M] = {
+  def collect[M](f: A => Option[M] @suspendable): Channel[M] = {
     val inCh  = this
     val outCh = Channel.createLike[M](inCh)
 
     scheduler execute { reset {
-      try while(true) {
-        val m = f( inCh() )
+      try loop {
+        val m = f( inCh.take )
         if (m.isDefined) outCh put m.get
         else             cpsunit    
-      }
-      catch { case TerminatedChannel => outCh terminate
-              case BreakLoop         =>
-              case e:Exception       => handleEx(e) }
+      } catch { case TerminatedChannel => outCh terminate
+                case BreakLoop         =>
+                case e:Exception       => handleEx(e) }
     }}
     outCh
   }
@@ -374,22 +371,22 @@ final class Channel[T](val capacity: Int)(implicit val scheduler: Scheduler)
    * 
    * @return new channel
    */
-  def flatMap[M](f: T => Channel[M] @suspendable): Channel[M] = {
+  def flatMap[M](f: A => Channel[M] @suspendable): Channel[M] = {
     val inCh  = this
     val outCh = Channel.createLike[M](inCh)
     
     scheduler execute reset {
       def transfer(from: Channel[M], to: Channel[M]): Unit @suspendable = {
         try while (true)
-          to put from()
+          to put from.take
         catch { case TerminatedChannel => }
       }
       
-      try while(true)
-        transfer(f( inCh() ), outCh)
-      catch { case TerminatedChannel => outCh.terminate
-              case BreakLoop         =>
-              case e:Exception       => handleEx(e) }
+      try loop {
+        transfer(f( inCh.take ), outCh)
+      } catch { case TerminatedChannel => outCh.terminate
+                case BreakLoop         =>
+                case e:Exception       => handleEx(e) }
     }
     outCh
   }
@@ -404,16 +401,16 @@ final class Channel[T](val capacity: Int)(implicit val scheduler: Scheduler)
    * 
    * @return new channel
    */
-  def flatMapIter[M](f: T => Iterable[M]): Channel[M] = {
+  def flatMapIter[M](f: A => Iterable[M]): Channel[M] = {
   	val inCh  = this
     val outCh = Channel.createLike[M](inCh)
     
     scheduler execute reset {
-      try while(true)
-        outCh putAll f( inCh() )
-      catch { case TerminatedChannel => outCh.terminate
-              case BreakLoop         =>
-              case e:Exception       => handleEx(e) }
+      try loop {
+        outCh putAll f( inCh.take )
+      } catch { case TerminatedChannel => outCh.terminate
+                case BreakLoop         =>
+                case e:Exception       => handleEx(e) }
     }
     outCh
   }
@@ -431,13 +428,13 @@ final class Channel[T](val capacity: Int)(implicit val scheduler: Scheduler)
    * 
    * @return new channel
    */
-  def filter(p: T => Boolean @suspendable): Channel[T] = {
+  def filter(p: A => Boolean @suspendable): Channel[A] = {
     val inCh  = this
-    val outCh = Channel.createLike[T](inCh)
+    val outCh = Channel.createLike[A](inCh)
     
     scheduler execute { reset {
-      try while (true) {
-        val in = inCh()
+      try loop {
+        val in = inCh.take
         if (p(in)) outCh put in 
         else       cpsunit
       } catch { case TerminatedChannel => outCh.terminate
@@ -448,16 +445,16 @@ final class Channel[T](val capacity: Int)(implicit val scheduler: Scheduler)
   }
   
   @deprecated("NOT YET TESTED")
-  def withFilter(p: T => Boolean @suspendable): ChannelFilter =
+  def withFilter(p: A => Boolean @suspendable): ChannelFilter =
     new ChannelFilter(p)
   
   
-  class ChannelFilter(p: T => Boolean @suspendable) {
+  class ChannelFilter(p: A => Boolean @suspendable) {
     
-    def foreach[U](f: T => U @suspendable): Unit @suspendable = {
+    def foreach[U](f: A => U @suspendable): Unit @suspendable = {
       val ch = self
-      try while(true) {
-        val v = ch()
+      try loop {
+        val v = ch.take
         if (p(v)) f(v)
         else      cpsunit //XXX U vs. Unit
       } catch { case TerminatedChannel => 
@@ -465,13 +462,13 @@ final class Channel[T](val capacity: Int)(implicit val scheduler: Scheduler)
                 case e:Exception       => handleEx(e) }
     }
     
-    def map[M](f: T => M @suspendable)(implicit scheduler: Scheduler): Channel[M] = {
+    def map[M](f: A => M @suspendable)(implicit scheduler: Scheduler): Channel[M] = {
       val inCh  = self
       val outCh = Channel.createLike[M](inCh)
   
       scheduler execute { reset {
-        try while(true) {
-          val v = inCh()
+        try loop {
+          val v = inCh.take
           if (p(v)) outCh put f(v)
           else      cpsunit
         } catch { case TerminatedChannel => outCh.terminate
@@ -481,19 +478,19 @@ final class Channel[T](val capacity: Int)(implicit val scheduler: Scheduler)
       outCh
     }
     
-    def flatMap[M](f: T => Channel[M] @suspendable): Channel[M] = {
+    def flatMap[M](f: A => Channel[M] @suspendable): Channel[M] = {
       val inCh  = self
       val outCh = Channel.createLike[M](inCh)
       
       scheduler execute reset {
         def transfer(from: Channel[M], to: Channel[M]): Unit @suspendable = {
           try while (true)
-            to put from()
+            to put from.take
           catch { case TerminatedChannel => }
         }
         
-        try while(true) {
-          val v = inCh()
+        try loop {
+          val v = inCh.take
           if (p(v)) transfer(f(v), outCh)
           else      cpsunit
         } catch { case TerminatedChannel => outCh.terminate
@@ -503,7 +500,7 @@ final class Channel[T](val capacity: Int)(implicit val scheduler: Scheduler)
       outCh
     }
     
-    def withFilter(q: T => Boolean): ChannelFilter = 
+    def withFilter(q: A => Boolean): ChannelFilter = 
       new ChannelFilter(x => p(x) && q(x))
   }
   
@@ -516,7 +513,7 @@ final class Channel[T](val capacity: Int)(implicit val scheduler: Scheduler)
    * 
    * @return result of reduction 
    */
-  def fold[B](z: B)(f: (T,B) => B @suspendable): B @suspendable = {
+  def fold[B](z: B)(f: (A,B) => B @suspendable): B @suspendable = {
     var res = z  
     this.foreach(x => {
       res = f(x, res)
@@ -526,7 +523,7 @@ final class Channel[T](val capacity: Int)(implicit val scheduler: Scheduler)
   }
   
   @throws(classOf[TerminatedChannel])
-  def reduce[B >: T](f: (T,B) => B @suspendable): B @suspendable = {
+  def reduce[B >: A](f: (A,B) => B @suspendable): B @suspendable = {
     val z: B = this.take
     this.fold(z)(f)
   }
@@ -545,13 +542,13 @@ final class Channel[T](val capacity: Int)(implicit val scheduler: Scheduler)
    * 
    * @return Tuple of 2 new Channels
    */
-  def duplicate(): (Channel[T], Channel[T]) = {
+  def duplicate(): (Channel[A], Channel[A]) = {
   	val inCh  = this
-  	val outCh1 = Channel.createLike[T](this)
-  	val outCh2 = Channel.createLike[T](this)
+  	val outCh1 = Channel.createLike[A](this)
+  	val outCh2 = Channel.createLike[A](this)
   	
   	scheduler execute { reset {
-  	  try while(true) {
+  	  try loop {
   	  	val in = inCh()
   	  	outCh1 put in
   	  	outCh2 put in
@@ -572,13 +569,13 @@ final class Channel[T](val capacity: Int)(implicit val scheduler: Scheduler)
    * 
    * @return Tuple of 2 new Channels
    */
-  def split(p: T => Boolean @suspendable): (Channel[T], Channel[T]) = {
+  def split(p: A => Boolean @suspendable): (Channel[A], Channel[A]) = {
   	val inCh  = this
-  	val outCh1 = Channel.createLike[T](this)
-  	val outCh2 = Channel.createLike[T](this)
+  	val outCh1 = Channel.createLike[A](this)
+  	val outCh2 = Channel.createLike[A](this)
   	
   	scheduler execute { reset {
-  	  try while(true) {
+  	  try loop {
   	  	val in = inCh()
   	  	if (p(in)) outCh1 put in
   	  	else       outCh2 put in
@@ -598,8 +595,8 @@ final class Channel[T](val capacity: Int)(implicit val scheduler: Scheduler)
    * @return new channel with values of both this and second channel
    */
   @deprecated("NOT YET TESTED")
-  def combine[A <: T](ch2: ChannelTake[A]): Channel[T] = {
-    val ch  = Channel.createLike[T](this)
+  def combine[B <: A](ch2: ChannelTake[B]): Channel[A] = {
+    val ch  = Channel.createLike[A](this)
     val ch1 = this
     val ch1Done = new Signal
     val ch2Done = new Signal
@@ -631,8 +628,8 @@ final class Channel[T](val capacity: Int)(implicit val scheduler: Scheduler)
    * @return
    */
   @deprecated("NOT YET TESTED")
-  def concat[A <: T](ch2: ChannelTake[A]): Channel[T] = {
-    val ch  = Channel.createLike[T](this)
+  def concat[B <: A](ch2: ChannelTake[B]): Channel[A] = {
+    val ch  = Channel.createLike[A](this)
     val ch1 = this
     scheduler execute { reset {
       ch1.foreach(x => ch put x)
@@ -650,7 +647,7 @@ final class Channel[T](val capacity: Int)(implicit val scheduler: Scheduler)
    * @param to Channel to transfer values into
    */
   @deprecated("NOT YET TESTED")
-  def transfer[B](to: ChannelPut[B], f: T => B): Unit = {
+  def transfer[B](to: ChannelPut[B], f: A => B): Unit = {
     val ch = this
     scheduler execute { reset {
       ch.foreach(x => to put f(x))
@@ -667,7 +664,7 @@ final class Channel[T](val capacity: Int)(implicit val scheduler: Scheduler)
    * @param to Channel to transfer values into
    */
   @deprecated("NOT YET TESTED")
-  def transferTerminate[B](to: ChannelPut[B] with ChannelTerminate[B], f: T => B): Unit = {
+  def transferTerminate[B](to: ChannelPut[B] with ChannelTerminate[B], f: A => B): Unit = {
     val ch = this
     scheduler execute { reset {
       ch.foreach(x => to put f(x))
@@ -685,8 +682,8 @@ final class Channel[T](val capacity: Int)(implicit val scheduler: Scheduler)
     throw e
   }
   
-  def toList(): List[T] @suspendable = {
-    var xs = List[T]()
+  def toList(): List[A] @suspendable = {
+    var xs = List[A]()
     this.foreach(xs ::= _)
     xs.reverse
   }

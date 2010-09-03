@@ -2,60 +2,52 @@ package dataflow
 package tests
 
 import dataflow._
+import DataFlowIterable._
 import scala.util.continuations._
 
-object SieveEratosthenes extends Benchmark {
+object SieveEratosthenes extends Test { //Benchmark {
   import java.util.concurrent.CountDownLatch
 	
   implicit val scheduler = new ForkJoinScheduler
-	  
-	def run(latch: CountDownLatch) = {
-	  val nums = Channel.create[Int]
-		//val prims = Channel[Int]
-
-		flow {
-			var num = 2
-			val max = 1000 * 10
-			while (num < max) {
-				nums << num				  			
-				num = num + 1
-			}
-			nums.<<#
-		}
-		
-		def sieve(prim: Int, ch: Channel[Int]): Unit = flow {
-//	    prims << prim
-	    
-		  var nextCh: Option[ Channel[Int] ] = None
-		  
-		  ch.foreach(x => {
-	      
-	      // not filtered by this channel
-	      if (x % prim != 0) {
-	        
-	        // create next sieve-filter
-	        if (!nextCh.isDefined) {
-//	          println("Prim: " + x)
-	          nextCh = Some( Channel.createLike[Int](ch) )
-			      sieve(x, nextCh.get)
-	        } else {
-	          // forward non-filtered elements
-            nextCh.get << x
-	        }
-	      }
-	    })
-	    
-      // propagate termination  
-      if (nextCh.isDefined)
-        nextCh.get <<#
-      else {
-        latch.countDown()
-//        prims <<#
+	
+  
+  def sieve(filter: Int, ch: Channel[Int], latch: CountDownLatch): Unit = flow {
+    var next: Channel[Int] = null
+    
+    ch.foreach(i => {
+      if (i % filter != 0) {
+        if (next == null) {
+          println(i)
+          next = Channel.createLike[Int](ch)
+          sieve(i, next, latch)
+        } else {
+          next << i
+        }
       }
-	  }
-		sieve(2, nums)
-	  
-//	  val fps = flow { prims.fold[ List[Int] ]( List() )( (x,z) => x :: z) }
-//	  println("PRIMS: " + fps.get.reverse.mkString(", "))
-	}
+    })
+    
+    if (next == null) {
+      latch.countDown
+    } else {
+      next <<#
+    }
+  }
+
+  
+	//def run(latch: CountDownLatch) = {
+  def run() = {
+	  val latch = new CountDownLatch(1)
+    
+    val in = Channel.createEager[Int]
+		sieve(2, in, latch)
+    
+    flow {
+	    for (i <- (2 to 1000*10).dataflow)
+	      in << i
+	    in <<#
+		}
+    
+    latch.await
+    println("foo")
+  }
 }

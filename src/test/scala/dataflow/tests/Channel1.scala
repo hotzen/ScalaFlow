@@ -3,26 +3,25 @@ package tests
 
 import dataflow._
 
-object Channel1 extends Test {
-
+object Channel1 {
   implicit val scheduler = new DaemonThreadPoolScheduler
   
-  def run {
-    val ch = Channel.create[Int] // shortcut for: Channel.create[Tnt].newEager
-        
+  def main(args: Array[String]): Unit ={
+    val ch = Channel.create[Int]
+    
+    // consumer-flow
     val f = flow {
       val v1 = ch()
-      println("first: " + v1)
-      
       val v2 = ch()
-      println("second: " + v2)
+      v1 + v2
+    }
+
+    // producer-flow
+    flow {
+      ch << 11
+      ch << 31
     }
     
-    // scheduling is non-deterministic channel = 1,2 or 2,1
-    flow { ch << 1 }
-    flow { ch << 2 }
-        
-    f.await 
-    println("done")
+    println("result: " + f.get)
   }
 }

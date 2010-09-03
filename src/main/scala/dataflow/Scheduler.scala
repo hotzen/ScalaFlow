@@ -1,5 +1,6 @@
 package dataflow
 
+
 object Scheduler {
   import java.util.concurrent._
 
@@ -38,7 +39,7 @@ class ThreadPoolScheduler extends Scheduler {
     )
   }
   
-  private val executor = createExecutor( Executors.defaultThreadFactory() )
+  protected val executor = createExecutor( Executors.defaultThreadFactory() )
 
   def execute(f: => Unit): Unit = executor execute new Runnable {
     //XXX proper exception-handling
@@ -66,7 +67,7 @@ class DaemonThreadPoolScheduler extends ThreadPoolScheduler {
     }
   } 
 
-  private val executor = createExecutor( daemonFactory )
+  override protected val executor = createExecutor( daemonFactory )
   
   override def shutdown = {
     executor.shutdown() // just to be nice

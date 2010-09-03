@@ -30,15 +30,17 @@ object Channel11 extends Test {
       println("post <<#\tT=" + Thread.currentThread.getName+" " + ch)
     }
       
-    flow {
+    Thread.sleep(500)
+    val f2 = flow {
       for (x <- ch) {
-        Thread.sleep(300)
+        Thread.sleep(500)
         println(x)
       }
       println("consumed " + ch)
     }
                 
-    f.await 
-    println("done")
+    f.await
+    f2.await
+    println("DONE")
   }
 }

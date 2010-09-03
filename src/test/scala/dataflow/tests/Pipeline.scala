@@ -12,23 +12,20 @@ object Pipeline extends Test {
     
     val p = new Pipeline[Int]
     
-    val lastStage = flow {
-      p.next(_+1).next(_*2).next(_*1.1)
-    }.get
-       
+    flow {
+      p put 1
+      p put 2
+      p put 3
+    }
     
     val f = flow {
-      for (x <- lastStage) {
+      val source = p
+      val sink = p stage(_+1) stage(_*2) stage(_*1.1)
+      
+      for (x <- sink) {
         println(x)
       }
-    }
-    
-    flow {
-      p << 1
-      p << 2
-      p << 3
-      p <<#
-    }
+    }       
     
     f.await
     println("done")

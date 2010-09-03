@@ -34,9 +34,12 @@ class Socket(val socketCh: SocketChannel = Socket.createSocketChannel)(implicit 
 	import Dispatcher._
 	private def cpsunit: Unit @suspendable = ()
 	
-	val read  = Channel.create[Array[Byte]]
-	val write = Channel.create[Array[Byte]]
+	private val readCh  = Channel.create[Array[Byte]]
+	private val writeCh = Channel.create[Array[Byte]]
 	
+  def read: ChannelTake[Array[Byte]] = readCh
+  def write: ChannelPut[Array[Byte]] with ChannelTerminate[Array[Byte]] = writeCh
+  
 	private val connectedSignal = new Signal
 	def connected: SuspendingAwait = connectedSignal
 	
@@ -101,7 +104,7 @@ class Socket(val socketCh: SocketChannel = Socket.createSocketChannel)(implicit 
 			} else {
 				readBuffer.flip
 				val bytes = readBuffer.remaining
-				read << Socket.ByteBufferToArray( readBuffer )
+				readCh << Socket.ByteBufferToArray( readBuffer )
 				log trace ("processRead: read " + bytes + " bytes")
 				true
 			}
@@ -144,7 +147,7 @@ class Socket(val socketCh: SocketChannel = Socket.createSocketChannel)(implicit 
   	  log trace ("processWrite: waiting for connected-sync")
   	  connected.sawait // suspend
   	  log trace ("processWrite: processing write-channel")
-  	  write.foreach(bytes => doWrite(ByteBuffer.wrap(bytes)) )
+  	  writeCh.foreach(bytes => doWrite(ByteBuffer.wrap(bytes)) )
       doneSignal.invoke
   	}}
   	
@@ -153,18 +156,18 @@ class Socket(val socketCh: SocketChannel = Socket.createSocketChannel)(implicit 
   
   def close: Unit = socketCh.close
   
-  private[io] def onClosed(ch: SelectableChannel) = {
+  private[io] def onClosed(ch: SelectableChannel): Unit = {
   	log trace ("onClosed: terminating read and write channels")
   	
   	if (!flagClosed) {
   	  flagClosed = true
-  	  read <<#;
-  	  write <<#;
+  	  readCh.tryTerminate
+  	  writeCh.tryTerminate
   	  closedSignal.invoke
   	}
   }
   
-  private[io] def onFailure(failure: Throwable) = {
+  private[io] def onFailure(failure: Throwable): Unit = {
     log error (failure, "onFailure: " + failure.getMessage + " - terminating read and write channels")
 
     if (!flagFailed) {
@@ -172,13 +175,13 @@ class Socket(val socketCh: SocketChannel = Socket.createSocketChannel)(implicit 
       
       if (!flagClosed) {
         flagClosed = true
-        read  <<#;
-        write <<#;
+        readCh.terminate
+        writeCh.terminate
         closedSignal.invoke
       }
     }
   }
   
   override def toString =
-    "<Socket "+socketCh+" read="+read+" write="+write+" >"
+    "<Socket "+socketCh+" read="+readCh+" write="+writeCh+" >"
 }

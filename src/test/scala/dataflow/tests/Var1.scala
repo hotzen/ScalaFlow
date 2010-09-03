@@ -3,16 +3,16 @@ package tests
 
 import dataflow._
 
-object Var1 extends Test {
+object Var1  {
 
   implicit val scheduler = new DaemonThreadPoolScheduler
   
-  def run {
+  def main(args: Array[String]): Unit = {
     val v = new Variable[Int]
     
-    flow { println( v() ) } // suspends until v is set
-    flow { v := 42 }
+    val f1 = flow { v()     }
+    val f2 = flow { v := 42 }
     
-    Thread.sleep(1000) // ensure flows are executed
+    println("r1="+f1.get+" r2="+f2.get)
   }
 }

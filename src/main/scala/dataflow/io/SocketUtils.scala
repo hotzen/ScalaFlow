@@ -6,12 +6,11 @@ import java.nio.charset.Charset
 
 trait SocketReadUtils { self: Socket =>
 
-	def readStrings(implicit charset: Charset): Channel[String] = {
-		read.map[String](bytes => {
+	def readStrings(implicit charset: Charset): Channel[String] =
+		read.map[String](bytes =>
 			charset.decode( ByteBuffer.wrap(bytes) ).toString
-		})
-	}
-	
+		)
+		
 	def readLines(implicit charset: Charset): Channel[String] = {
 		import scala.math.{min, max}
 		val CR = 13
