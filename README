@@ -1,0 +1,8 @@
+== ScalaFlow - Continuation Based DataFlow-Concurrency in Scala ==
+
+Master Thesis: http://github.com/hotzen/ScalaFlow/thesis.pdf
+Tests/Demos: http://github.com/hotzen/ScalaFlow/tree/master/src/test/scala/dataflow/tests/
+
+Feedback appreciated.
+
+Cheers, Kai
